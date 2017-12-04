@@ -41,8 +41,8 @@ module RSpotify
       users_credentials = if User.class_variable_defined?('@@users_credentials')
         User.class_variable_get('@@users_credentials')
       end
-
       if users_credentials && users_credentials[user_id]
+        @client_token = users_credentials[user_id]["token"]
         User.oauth_get(user_id, url)
       else
         get(url)
@@ -60,7 +60,7 @@ module RSpotify
 
       begin
         response = RestClient.send(verb, url, *params)
-      rescue RestClient::Forbidden, RestClient::Unauthorized
+      rescue RestClient::Unauthorized
         if @client_token
           authenticate(@client_id, @client_secret)
 
@@ -81,7 +81,7 @@ module RSpotify
     end
 
     def auth_header
-      authorization = Base64.strict_encode64 "#{@client_id}:#{@client_secret}"
+      authorization = Base64.strict_encode64 "#{ENV['SPOTIFY_CLIENT_ID']}:#{ENV['SPOTIFY_CLIENT_SECRET']}"
       { 'Authorization' => "Basic #{authorization}" }
     end
   end

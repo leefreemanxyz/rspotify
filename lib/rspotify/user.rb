@@ -30,18 +30,18 @@ module RSpotify
       false
     end
 
-    def self.refresh_token(user_id)
+    def self.refresh_token(user_id, refresh_token)
       request_body = {
         grant_type: 'refresh_token',
-        refresh_token: @@users_credentials[user_id]['refresh_token']
+        refresh_token: refresh_token
       }
       response = RestClient.post(TOKEN_URI, request_body, RSpotify.send(:auth_header))
       response = JSON.parse(response)
-      @@users_credentials[user_id]['token'] = response['access_token']
-    rescue RestClient::BadRequest => e
+      # @@users_credentials[user_id]['token'] = response['access_token']
+    rescue RestClient::BadRequest, RestClient::Exception => e
       raise e if e.response !~ /Refresh token revoked/
     end
-    private_class_method :refresh_token
+    # private_class_method :refresh_token
 
     def self.oauth_header(user_id)
       {
@@ -53,7 +53,7 @@ module RSpotify
 
     def self.oauth_send(user_id, verb, path, *params)
       RSpotify.send(:send_request, verb, path, *params)
-    rescue RestClient::Forbidden => e
+    rescue RestClient::Unauthorized => e
       raise e if e.response !~ /access token expired/
       refresh_token(user_id)
       params[-1] = oauth_header(user_id)
@@ -68,26 +68,29 @@ module RSpotify
       end
     end
 
-    def initialize(options = {})
-      credentials = options['credentials']
-      extra       = options['extra'].to_h
-      options     = options['info'] if options['info']
-      options.merge!(extra['raw_info'].to_h)
+    def initialize(user = {})
+      # debugger
+      # credentials = user['credentials']
+      # extra       = user['extra'].to_h
+      # user     = user['info'] if user['info']
+      # user.merge!(extra['raw_info'].to_h)
+      @access_token = user['access_token']
+      @refresh_token = user['refresh_token']
+      # @birthdate    ||= user['birthdate']
+      # @country      ||= user['country']
+      # @display_name ||= user['display_name']
+      # @email        ||= user['email']
+      # @followers    ||= user['followers']
+      # @images       ||= user['images']
+      # @product      ||= user['product']
 
-      @birthdate    ||= options['birthdate']
-      @country      ||= options['country']
-      @display_name ||= options['display_name']
-      @email        ||= options['email']
-      @followers    ||= options['followers']
-      @images       ||= options['images']
-      @product      ||= options['product']
+      super(user)
 
-      super(options)
-
-      if credentials
+      if @access_token && @refresh_token
         @@users_credentials ||= {}
-        @@users_credentials[@id] = credentials
-        @credentials = @@users_credentials[@id]
+        @@users_credentials[@id] = {}
+        @@users_credentials[@id]["token"] = @access_token
+        @@users_credentials[@id]['refresh_token'] = @arefresh_token
       end
     end
 
@@ -117,7 +120,7 @@ module RSpotify
 
     def currently_playing
       url = "me/player/currently-playing"
-      response = User.oauth_get(@id, url)
+      response = RSpotify.resolve_auth_request(@id, url)
       return response if RSpotify.raw_response
       Track.new response["item"]
     end
@@ -140,18 +143,23 @@ module RSpotify
     #           recently_played = user.recently_played
     #           recently_played.size       #=> 20
     #           recently_played.first.name #=> "Ice to Never"
-    def recently_played(limit: 20)
-      url = "me/player/recently-played?limit=#{limit}"
-      response = User.oauth_get(@id, url)
+    def recently_played(last_checked, limit: 20)
+      url = "me/player/recently-played?limit=#{limit}&after=#{last_checked}"
+      # Rspotify.raw_response = true
+      response = RSpotify.resolve_auth_request(@id, url)
       return response if RSpotify.raw_response
-
       json = RSpotify.raw_response ? JSON.parse(response) : response
+      spotify_data = {}
+      spotify_data["next"] = json["next"]
+      spotify_data["cursors"] = json["cursors"]
+      spotify_data["tracks"] = []
       json['items'].map do |t|
         data = t['track']
         data['played_at'] = t['played_at']
         data['context_type'] = t['context']['type'] if t['context']
-        Track.new data
+        spotify_data["tracks"] << Track.new(data)
       end
+      return spotify_data
     end
 
     # Add the current user as a follower of one or more artists, other Spotify users or a playlist. Following artists or users require the *user-follow-modify*
